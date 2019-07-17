@@ -4,7 +4,7 @@ def testset():
 	    lines = f.read().splitlines()
 
 	KO_gene = 'Per2'
-	context = 'Lipid Metabolism'
+	context = ['Lipid Metabolism','inflammatory response', 'adipocyte differentiation', 'adipogenesis']
 
 	return lines, KO_gene, context
 
@@ -35,7 +35,7 @@ def attain_seed_gene_list(user_context, KO_gene, DEG_list):
 
 	print ('[Notice] Proceeding BEST')
 	
-	bestQuery = best.BESTQuery({"keywordA":[user_context], "keywordB":[KO_gene], "filterObjectName":"","topN":50})
+	bestQuery = best.BESTQuery({"keywordA":[user_context], "keywordB":[KO_gene], "filterObjectName":"","topN":100})
 	relevantEntities = best.getRelevantBioEntities(bestQuery)
 	print ((relevantEntities['genes']))
 	print (len(relevantEntities['genes']))
@@ -60,6 +60,7 @@ def StringDB_to_dict():
 	print ('[FL_MLV] START StringDB_to_dict')
 
 	StringDB_dir = '//data/project/hurben/database/MED_STRING_PPI_Mus_musculus_Symbol.txt'
+#	StringDB_dir = '//data/project/hurben/database/HIGH_STRING_PPI_Mus_musculus_Symbol.txt'
 	StringDB_open = open(StringDB_dir,'r')
 	StringDB_readlines = StringDB_open.readlines()
 
@@ -202,8 +203,12 @@ def organize_rwr_results(tag, rwr_summary_dict, available_deg_list):
 		read = read.replace('\n','')
 		token = read.split()
 
-		gene = token[0]
-		prob = float(token[1])
+		try :
+			gene = token[0]
+			prob = float(token[1])
+		except IndexError:
+			print ('############################ERROR')
+			print (read)
 
 		score_dict[gene] = prob
 
@@ -221,7 +226,7 @@ def organize_rwr_results(tag, rwr_summary_dict, available_deg_list):
 	return rwr_summary_dict, available_deg_list
 
 
-def rwr_summary(rwr_summary_dict, available_deg_list):
+def rwr_summary(rwr_summary_dict, available_deg_list, context_list):
 
 #	import numpy as np
 #	for gene in DEG_list:
@@ -236,20 +241,42 @@ def rwr_summary(rwr_summary_dict, available_deg_list):
 
 
 	f = open('rwr.summary.table.txt','w')
-	f.write('\toriginal')
+	for context in context_list:
+		f.write('\t' + str(context))
+
 	for i in range(iteration):
-		f.write('\t' + i)
+		f.write('\t' + str(i))
 	f.write('\n')
 
 	for gene in available_deg_list:
 		f.write(gene)
-		score = rwr_summary_dict[gene,'original']
-		f.write('\t' + str(score))
+
+		for context in context_list:
+			context = context.replace(' ','_')
+			score = rwr_summary_dict[gene, context]
+			f.write('\t' + str(score))
+
 		for i in range(iteration):
 			score = rwr_summary_dict[gene,i]
 			f.write('\t' + str(score))
+
 		f.write('\n')
 
+
+def random_seed_gene(ppi_dict, DEG_list, average_seed_gene):
+
+	seed_gene_list = []
+	LEN_ppi_dict = len(ppi_dict.keys())
+
+	for i in range(round(average_seed_gene)):
+
+		gene = list(ppi_dict.keys())[randrange(LEN_ppi_dict)]
+
+		if gene not in seed_gene_list:
+			if gene not in DEG_list:
+				seed_gene_list.append(gene)
+
+	return seed_gene_list
 		
 
 
@@ -275,45 +302,43 @@ if __name__ == '__main__':
 	available_deg_list = []
 
 		
-	DEG_list, KO_gene, context = testset()
-	seed_gene_list = attain_seed_gene_list(context, KO_gene, DEG_list)
-	print ("Number of DEG genes", len(DEG_list))
-	print ("Number of seed genes", len(seed_gene_list))
-	total_gene_list = DEG_list + seed_gene_list
+	DEG_list, KO_gene, context_list = testset()
+	iteration = 100
+	seed_gene_count = 0
 
-	iteration = 30
-	tag = 'original'
-	topology_dict = Create_RWR_Condition_AdjacencyMatrix_part1(ppi_dict, total_gene_list)
-	Create_RWR_Condition_AdjacencyMatrix_part2(topology_dict, total_gene_list, tag)
-	Create_RWR_p0_vector(topology_dict, total_gene_list, seed_gene_list, tag)
-	Run_RWR(tag)
-	rwr_summary_dict, available_deg_list = organize_rwr_results(tag,rwr_summary_dict,available_deg_list)
+	print ("Number of DEG genes", len(DEG_list))
+#	print ("Number of seed genes", len(seed_gene_list))
+
+	for context in context_list:
+
+		print (context)
+		seed_gene_list = attain_seed_gene_list(context, KO_gene, DEG_list)
+		seed_gene_count += len(seed_gene_list)
+		total_gene_list = DEG_list + seed_gene_list
+		tag = context
+		tag = tag.replace(' ','_')
+
+		topology_dict = Create_RWR_Condition_AdjacencyMatrix_part1(ppi_dict, total_gene_list)
+		Create_RWR_Condition_AdjacencyMatrix_part2(topology_dict, total_gene_list, tag)
+		Create_RWR_p0_vector(topology_dict, total_gene_list, seed_gene_list, tag)
+		Run_RWR(tag)
+		rwr_summary_dict, available_deg_list = organize_rwr_results(tag,rwr_summary_dict,available_deg_list)
+	
+	average_seed_gene = seed_gene_count / 4
+	print (average_seed_gene)
 
 	for i in range(iteration):
-		tag = i
-		seed_gene_list = False
 
-		while not seed_gene_list:
-		
-			try : 
-				random_context = GO_term_list[randrange(47394)]
-				LEN_random_context = len(random_context.split(' '))
-				random_context_token = random_context.split(' ')
-				if LEN_random_context > 3:
-					random_context = '%s %s %s' % (random_context_token[0], random_context_token[1], random_context_token[2])
-				seed_gene_list = attain_seed_gene_list(random_context, KO_gene, DEG_list)
-			except KeyError:
-				print ('cannot do with random context : %s ' % random_context)
-				pass
-
+		seed_gene_list = random_seed_gene(ppi_dict, DEG_list, average_seed_gene)
 		total_gene_list = DEG_list + seed_gene_list
+		tag = i
+
 		topology_dict = Create_RWR_Condition_AdjacencyMatrix_part1(ppi_dict, total_gene_list)
 		Create_RWR_Condition_AdjacencyMatrix_part2(topology_dict, total_gene_list, tag)
 		Create_RWR_p0_vector(topology_dict, total_gene_list, seed_gene_list, tag)
 		Run_RWR(tag)
 		rwr_summary_dict, available_deg_list = organize_rwr_results(tag, rwr_summary_dict,available_deg_list)
 
-
-	rwr_summary(rwr_summary_dict, available_deg_list)
+	rwr_summary(rwr_summary_dict, available_deg_list, context_list)
 
 
